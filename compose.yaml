@@ -1,15 +1,74 @@
 services:
-  store-db:
+
+  # ── 1. База данных ────────────────────────────────────────────
+  postgres:
     image: postgres:17
     restart: unless-stopped
     environment:
       POSTGRES_USER: klavisha
       POSTGRES_PASSWORD: klavisha_password
       POSTGRES_DB: store_db
-    ports:
-      - "5432:5432"
     volumes:
-      - store-db-data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U klavisha -d store_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── 2. Redis (для очередей Medusa) ───────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── 3. Medusa backend ─────────────────────────────────────────
+  medusa:
+    build:
+      context: ./klavisha
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://klavisha:klavisha_password@postgres/store_db
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-supersecret}
+      COOKIE_SECRET: ${COOKIE_SECRET:-supersecret}
+      STORE_CORS: ${STORE_CORS:-http://localhost:3000}
+      ADMIN_CORS: ${ADMIN_CORS:-http://localhost:9000}
+      AUTH_CORS: ${AUTH_CORS:-http://localhost:9000,http://localhost:3000}
+    ports:
+      - "9000:9000"   # также для доступа к Admin панели (/app)
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 90s  # время на миграции и сборку
+
+  # ── 4. Фронтенд (nginx + Vite SPA) ───────────────────────────
+  frontend:
+    build:
+      context: ./klavisha-website
+      args:
+        VITE_MEDUSA_PUBLISHABLE_KEY: ${VITE_MEDUSA_PUBLISHABLE_KEY}
+        VITE_DEFAULT_REGION: ${VITE_DEFAULT_REGION:-uz}
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      medusa:
+        condition: service_healthy
 
 volumes:
-  store-db-data:
+  postgres-data:
+  redis-data:
