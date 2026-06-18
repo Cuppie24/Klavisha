@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ChevronRight, Heart } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Heart } from 'lucide-react'
+import useEmblaCarousel from 'embla-carousel-react'
 import {
   type MedusaProduct,
   type MedusaProductVariant,
@@ -37,7 +38,12 @@ export function ProductPage() {
   const [relatedProducts, setRelatedProducts] = useState<MedusaProduct[]>([])
   const [categoryName, setCategoryName] = useState('')
 
+  const [thumbsEdge, setThumbsEdge] = useState({ start: true, end: true })
+
   const uniqueImagesRef = useRef<string[]>([])
+  const thumbsRef = useRef<HTMLDivElement>(null)
+  const isDraggingRef = useRef(false)
+  const [emblaRef, emblaApi] = useEmblaCarousel({ loop: true })
 
   const { toggleFavorite, isFavorite } = useFavoritesContext()
 
@@ -125,6 +131,102 @@ export function ProductPage() {
     return () => window.removeEventListener('keydown', handleKey)
   }, [lightboxOpen])
 
+  // Sync activeImage from embla swipe
+  const onEmblaSelect = useCallback(() => {
+    if (!emblaApi) return
+    setActiveImage(emblaApi.selectedScrollSnap())
+  }, [emblaApi])
+
+  useEffect(() => {
+    if (!emblaApi) return
+    emblaApi.on('select', onEmblaSelect)
+    return () => { emblaApi.off('select', onEmblaSelect) }
+  }, [emblaApi, onEmblaSelect])
+
+  // Reinit + jump to first slide when product/variant images change
+  useEffect(() => {
+    if (!emblaApi) return
+    emblaApi.reInit()
+    emblaApi.scrollTo(0, true)
+  }, [emblaApi, product?.id, selectedVariant?.id])
+
+  // Thumb strip edge detection (for gradient + arrows)
+  useEffect(() => {
+    const el = thumbsRef.current
+    if (!el) return
+    const update = () => setThumbsEdge({
+      start: el.scrollLeft <= 1,
+      end: el.scrollLeft + el.clientWidth >= el.scrollWidth - 1,
+    })
+    update()
+    el.addEventListener('scroll', update, { passive: true })
+    window.addEventListener('resize', update, { passive: true })
+    return () => {
+      el.removeEventListener('scroll', update)
+      window.removeEventListener('resize', update)
+    }
+  }, [product?.id, selectedVariant?.id])
+
+  const scrollThumbsBy = (dir: 1 | -1) => {
+    thumbsRef.current?.scrollBy({ left: dir * 160, behavior: 'smooth' })
+  }
+
+  // Drag-to-scroll with momentum on thumb strip
+  useEffect(() => {
+    const el = thumbsRef.current
+    if (!el) return
+    let startX = 0
+    let scrollLeft = 0
+    let dragging = false
+    let velX = 0
+    let lastX = 0
+    let rafId = 0
+
+    const onDown = (e: MouseEvent) => {
+      if (e.button !== 0) return
+      cancelAnimationFrame(rafId)
+      dragging = true
+      isDraggingRef.current = false
+      startX = e.pageX - el.offsetLeft
+      scrollLeft = el.scrollLeft
+      lastX = e.pageX
+      velX = 0
+      el.style.cursor = 'grabbing'
+    }
+    const onMove = (e: MouseEvent) => {
+      if (!dragging) return
+      velX = e.pageX - lastX
+      lastX = e.pageX
+      const dx = e.pageX - el.offsetLeft - startX
+      if (Math.abs(dx) > 4) isDraggingRef.current = true
+      el.scrollLeft = scrollLeft - dx
+    }
+    const onUp = () => {
+      if (!dragging) return
+      dragging = false
+      el.style.cursor = ''
+      // keep isDraggingRef true until after click fires, then clear
+      setTimeout(() => { isDraggingRef.current = false }, 0)
+      const glide = () => {
+        if (Math.abs(velX) < 0.5) return
+        el.scrollLeft -= velX
+        velX *= 0.9
+        rafId = requestAnimationFrame(glide)
+      }
+      glide()
+    }
+
+    el.addEventListener('mousedown', onDown)
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      cancelAnimationFrame(rafId)
+      el.removeEventListener('mousedown', onDown)
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [product?.id])
+
   // Reset qty when variant changes
   useEffect(() => { setQty(1) }, [selectedVariant?.id])
 
@@ -154,7 +256,7 @@ export function ProductPage() {
   })()
   uniqueImagesRef.current = uniqueImages
 
-  useEffect(() => { setActiveImage(0) }, [selectedVariant?.id])
+  useEffect(() => { setActiveImage(0); emblaApi?.scrollTo(0, true) }, [emblaApi, selectedVariant?.id])
 
   const variantPrice = selectedVariant?.calculated_price
   const price = variantPrice
@@ -254,28 +356,56 @@ export function ProductPage() {
                 style={{ cursor: uniqueImages.length > 0 ? 'zoom-in' : 'default' }}
               >
                 {!inStock && <span className="pp-edt-g-soldtag">Нет в наличии</span>}
-                {uniqueImages.length > 0
-                  ? <img className="pp-edt-g-img" src={uniqueImages[activeImage]} alt={product.title} loading="eager" decoding="async" />
-                  : <div className="pp-edt-g-placeholder" />
-                }
+                {uniqueImages.length > 0 ? (
+                  <div className="pp-edt-g-embla" ref={emblaRef}>
+                    <div className="pp-edt-g-embla-container">
+                      {uniqueImages.map((url, i) => (
+                        <div key={url + i} className="pp-edt-g-embla-slide">
+                          <img className="pp-edt-g-img" src={url} alt={product.title} loading={i === 0 ? 'eager' : 'lazy'} decoding="async" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="pp-edt-g-placeholder" />
+                )}
                 {uniqueImages.length > 0 && (
                   <span className="pp-edt-g-cap">/ {String(activeImage + 1).padStart(2, '0')}</span>
                 )}
               </div>
 
               {uniqueImages.length >= 2 && (
-                <div className="pp-edt-g-thumbs">
-                  {uniqueImages.map((url, i) => (
-                    <button
-                      key={i}
-                      className={`pp-edt-g-thumb${activeImage === i ? ' pp-edt-g-thumb--on' : ''}`}
-                      onClick={() => setActiveImage(i)}
-                      aria-label={`Фото ${i + 1}`}
-                    >
-                      <img src={url} alt="" draggable={false} loading="lazy" decoding="async" />
-                      <span>{String(i + 1).padStart(2, '0')}</span>
+                <div className="pp-edt-g-thumbs-track">
+                  <div
+                    className={[
+                      'pp-edt-g-thumbs',
+                      thumbsEdge.start && 'pp-edt-g-thumbs--start',
+                      thumbsEdge.end && 'pp-edt-g-thumbs--end',
+                    ].filter(Boolean).join(' ')}
+                    ref={thumbsRef}
+                  >
+                    {uniqueImages.map((url, i) => (
+                      <button
+                        key={i}
+                        className={`pp-edt-g-thumb${activeImage === i ? ' pp-edt-g-thumb--on' : ''}`}
+                        onClick={(e) => { e.stopPropagation(); if (isDraggingRef.current) return; emblaApi ? emblaApi.scrollTo(i) : setActiveImage(i) }}
+                        aria-label={`Фото ${i + 1}`}
+                      >
+                        <img src={url} alt="" draggable={false} loading="lazy" decoding="async" />
+                        <span>{String(i + 1).padStart(2, '0')}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {!thumbsEdge.start && (
+                    <button className="pp-edt-g-tharrow pp-edt-g-tharrow--l" onClick={() => scrollThumbsBy(-1)} aria-label="Назад">
+                      <ChevronLeft size={14} strokeWidth={2.5} />
                     </button>
-                  ))}
+                  )}
+                  {!thumbsEdge.end && (
+                    <button className="pp-edt-g-tharrow pp-edt-g-tharrow--r" onClick={() => scrollThumbsBy(1)} aria-label="Вперёд">
+                      <ChevronRight size={14} strokeWidth={2.5} />
+                    </button>
+                  )}
                 </div>
               )}
             </div>

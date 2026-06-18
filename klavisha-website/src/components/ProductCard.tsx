@@ -22,6 +22,7 @@ export function ProductCard({
   const price = getCheapestPrice(product)
   const inStock = product.variants?.some(isVariantInStock) ?? false
   const isHot = product.tags?.some((t) => t.value === 'hot') ?? false
+  const variantCount = product.variants?.length ?? 0
 
   return (
     <article
@@ -72,6 +73,9 @@ export function ProductCard({
               <Flame size={11} strokeWidth={2.5} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 3 }} />
               Хит
             </span>
+          )}
+          {variantCount > 1 && (
+            <span className="edt-m-vars">{variantCount} вариант{variantCount === 1 ? '' : variantCount < 5 ? 'а' : 'ов'}</span>
           )}
         </div>
       </div>

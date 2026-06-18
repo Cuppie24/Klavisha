@@ -65,9 +65,9 @@ export interface MedusaProductVariant {
   id: string
   title: string
   sku?: string
-  inventory_quantity: number
-  manage_inventory: boolean
-  allow_backorder: boolean
+  inventory_quantity?: number
+  manage_inventory?: boolean
+  allow_backorder?: boolean
   calculated_price?: {
     calculated_amount: number
     original_amount: number
@@ -436,7 +436,8 @@ export function getCheapestPrice(product: MedusaProduct): {
 export function isVariantInStock(variant: MedusaProductVariant): boolean {
   if (!variant.manage_inventory) return true
   if (variant.allow_backorder) return true
-  return (variant.inventory_quantity ?? 0) > 0
+  if (variant.inventory_quantity == null) return true
+  return variant.inventory_quantity > 0
 }
 
 // ─── Регион по умолчанию (кешируется) ─────────────────────────────────────────

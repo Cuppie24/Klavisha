@@ -5361,6 +5361,13 @@
   text-transform: uppercase;
 }
 
+.edt-m-vars {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--fg-dim, #888);
+  letter-spacing: 0.02em;
+}
+
 /* ═══════════════════════════════════════════════════
    Editorial Dark Product Page
 ═══════════════════════════════════════════════════ */
@@ -5446,6 +5453,24 @@
   }
 }
 
+.pp-edt-g-embla {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.pp-edt-g-embla-container {
+  display: flex;
+  height: 100%;
+  will-change: transform;
+}
+
+.pp-edt-g-embla-slide {
+  flex: none;
+  width: 100%;
+  height: 100%;
+}
+
 .pp-edt-g-img {
   width: 100%;
   height: 100%;
@@ -5488,15 +5513,72 @@
   border-radius: 100px;
 }
 
+.pp-edt-g-thumbs-track {
+  position: relative;
+  max-width: var(--photo-w);
+  margin-top: 8px;
+
+  @media (max-width: 900px) {
+    max-width: 100%;
+  }
+}
+
 .pp-edt-g-thumbs {
   flex-shrink: 0;
   display: flex;
   gap: 12px;
-  margin-top: 14px;
+  overflow-x: auto;
+  border-radius: 16px;
+  cursor: grab;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  padding: 6px 6px 4px;
+  mask-image: linear-gradient(to right, transparent 0, black 44px, black calc(100% - 44px), transparent 100%);
+
+  &::-webkit-scrollbar { display: none; }
+
+  &.pp-edt-g-thumbs--start {
+    mask-image: linear-gradient(to right, black calc(100% - 44px), transparent 100%);
+  }
+  &.pp-edt-g-thumbs--end {
+    mask-image: linear-gradient(to right, transparent 0, black 44px, black 100%);
+  }
+  &.pp-edt-g-thumbs--start.pp-edt-g-thumbs--end {
+    mask-image: none;
+  }
 
   @media (max-width: 640px) {
     gap: 8px;
   }
+}
+
+.pp-edt-g-tharrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 3;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(10, 10, 10, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  transition: border-color 0.15s, color 0.15s;
+  pointer-events: all;
+
+  &:hover {
+    border-color: var(--neon);
+    color: var(--neon);
+  }
+
+  &.pp-edt-g-tharrow--l { left: 8px; }
+  &.pp-edt-g-tharrow--r { right: 8px; }
 }
 
 .pp-edt-g-thumb {
