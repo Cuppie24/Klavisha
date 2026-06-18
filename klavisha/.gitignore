@@ -24,3 +24,5 @@ build
 !.yarn/versions
 
 .medusa
+# Uzum import staging (transient data; scripts live in src/scripts)
+.uzum-import/

@@ -1,0 +1,98 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+:root {
+  /* ── Brand accent ──────────────────────────────────────────── */
+  --accent: #00c47a;
+  --accent-hover: #00a866;
+  --accent-light: rgba(0, 196, 122, 0.12);
+  --accent-rgb: 0, 196, 122;
+
+  /* ── Text ──────────────────────────────────────────────────── */
+  --text:       rgba(210, 212, 240, 0.68);
+  --text-h:     #eeeeff;
+  --text-muted: rgba(200, 202, 230, 0.45);
+
+  /* ── Backgrounds ───────────────────────────────────────────── */
+  --bg:          #080812;
+  --bg-card:     rgba(255, 255, 255, 0.06);
+  --bg-elevated: rgba(255, 255, 255, 0.04);
+  --bg-input:    rgba(255, 255, 255, 0.08);
+
+  /* ── Borders ───────────────────────────────────────────────── */
+  --border:        rgba(255, 255, 255, 0.1);
+  --border-hover:  rgba(255, 255, 255, 0.18);
+  --border-accent: rgba(0, 196, 122, 0.3);
+
+  /* ── Glass system ──────────────────────────────────────────── */
+  --glass-bg:     rgba(255, 255, 255, 0.065);
+  --glass-border: rgba(255, 255, 255, 0.12);
+  --glass-blur:   blur(24px) saturate(160%);
+
+  /* ── Shadows ───────────────────────────────────────────────── */
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.04);
+  --shadow-md: 0 8px 32px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.25);
+  --glow-accent: 0 0 28px rgba(0, 196, 122, 0.35);
+
+  /* ── Status colors ─────────────────────────────────────────── */
+  --discount: #f87171;
+  --green:    #4ade80;
+  --star:     #fbbf24;
+
+  /* ── Typography ────────────────────────────────────────────── */
+  --sans:    'Space Grotesk', system-ui, sans-serif;
+  --display: 'Space Grotesk', sans-serif;
+  --jost:    'Space Grotesk', sans-serif;
+  --radius:    16px;
+  --radius-sm: 10px;
+
+  /* ── Editorial Dark catalog tokens ────────────────────────── */
+  --neon: #00ff9d;
+  --space-grotesk: 'Space Grotesk', sans-serif;
+  --hanken: 'Hanken Grotesk', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', monospace;
+  --header-h: 64px;
+  --catbar-h: 54px;
+
+  /* ── Landing / hero shared tokens ─────────────────────────── */
+  --gold:       #00c47a;
+  --gold-dim:   #00a866;
+  --gold-light: rgba(0, 196, 122, 0.12);
+  --gold-glow:  rgba(0, 196, 122, 0.22);
+
+  --hero-bg:      #080812;
+  --hero-bg2:     #0d0d1e;
+  --hero-text:    #eeeeff;
+  --hero-muted:   rgba(210, 212, 240, 0.6);
+  --hero-surface: rgba(255, 255, 255, 0.065);
+  --hero-border:  rgba(255, 255, 255, 0.1);
+
+  font: 16px/1.5 var(--sans);
+  letter-spacing: -0.01em;
+  color: var(--text);
+  background: var(--bg);
+  color-scheme: dark;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+#root { width: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--sans);
+  font-weight: 700;
+  color: var(--text-h);
+  margin: 0;
+}
+
+p { margin: 0; }
+a { text-decoration: none; color: inherit; }
+button { font-family: var(--sans); cursor: pointer; }
