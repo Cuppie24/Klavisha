@@ -19,7 +19,7 @@ interface Props {
   regionId: string | null | undefined
   query: string
   favorites: string[]
-  onToggleFavorite: (id: string) => void
+  onToggleFavorite: (product: MedusaProduct) => void
   activeCategoryIds?: Set<string>
   hasUncategorized?: boolean
 }
@@ -382,7 +382,7 @@ export function ProductsView({
                   key={product.id}
                   product={product}
                   isFavorite={favSet.has(product.id)}
-                  onToggleFavorite={() => onToggleFavorite(product.id)}
+                  onToggleFavorite={() => onToggleFavorite(product)}
                   onCardClick={() => navigate(`/product/${product.handle}`)}
                 />
               ))}

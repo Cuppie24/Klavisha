@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import {
   type MedusaCategory,
+  type MedusaProduct,
   OTHER_CATEGORY,
 } from '../../lib/medusa'
 import { filterEmptyCategories } from '../CategoryTree'
@@ -11,13 +12,14 @@ interface Props {
   categories: MedusaCategory[]
   regionId: string | null | undefined
   favorites: string[]
-  onToggleFavorite: (id: string) => void
+  onToggleFavorite: (product: MedusaProduct) => void
   activeCategoryIds: Set<string>
   hasUncategorized: boolean
   sort?: CatalogSort
   priceRange?: [number, number] | null
   // When a price filter is active: only render these root sections (null = all).
   visibleRootIds?: Set<string> | null
+  q?: string
 }
 
 export function AllCategoriesView({
@@ -30,6 +32,7 @@ export function AllCategoriesView({
   sort = 'default',
   priceRange = null,
   visibleRootIds = null,
+  q,
 }: Props) {
   const rootCategories = useMemo(
     () =>
@@ -50,7 +53,7 @@ export function AllCategoriesView({
     <>
       {allSections.map((cat, i) => (
         <CategorySection
-          key={cat.id}
+          key={`${cat.id}::${q ?? ''}`}
           category={cat}
           regionId={regionId}
           favorites={favorites}
@@ -58,6 +61,7 @@ export function AllCategoriesView({
           index={i}
           sort={sort}
           priceRange={priceRange}
+          q={q}
         />
       ))}
     </>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import { ChevronLeft, ChevronRight, Heart } from 'lucide-react'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
+import { ChevronLeft, ChevronRight, Heart, ShoppingCart } from 'lucide-react'
 import useEmblaCarousel from 'embla-carousel-react'
 import {
   type MedusaProduct,
@@ -9,19 +9,22 @@ import {
   getDefaultRegion,
   listCategories,
   listProducts,
-  addToCart,
   formatPrice,
   getCheapestPrice,
   isVariantInStock,
+  getVariantStock,
 } from '../lib/medusa'
+import { loadLatestCatalogView } from '../lib/catalogState'
 import { AppHeader } from '../components/AppHeader'
 import { AppFooter } from '../components/AppFooter'
 import { useFavoritesContext } from '../context/FavoritesContext'
+import { useCartContext } from '../context/CartContext'
 
 
 export function ProductPage() {
   const { productHandle } = useParams<{ productHandle: string }>()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
 
   const [product, setProduct] = useState<MedusaProduct | null>(null)
   const [loading, setLoading] = useState(true)
@@ -39,13 +42,19 @@ export function ProductPage() {
   const [categoryName, setCategoryName] = useState('')
 
   const [thumbsEdge, setThumbsEdge] = useState({ start: true, end: true })
+  const [imgScrolledOut, setImgScrolledOut] = useState(false)
 
   const uniqueImagesRef = useRef<string[]>([])
   const thumbsRef = useRef<HTMLDivElement>(null)
+  const galleryRef = useRef<HTMLDivElement>(null)
   const isDraggingRef = useRef(false)
   const [emblaRef, emblaApi] = useEmblaCarousel({ loop: true })
 
+  const [stockMsg, setStockMsg] = useState<string | null>(null)
+  const stockMsgTimer = useRef<number | undefined>(undefined)
+
   const { toggleFavorite, isFavorite } = useFavoritesContext()
+  const { cart, addToCart, updateItem, removeItem, loading: cartLoading } = useCartContext()
 
   useEffect(() => { window.scrollTo(0, 0) }, [])
 
@@ -68,11 +77,15 @@ export function ProductPage() {
     setActiveImage(0)
     setRelatedProducts([])
     setCategoryName('')
+    const variantParam = searchParams.get('variant')
     getProduct(productHandle, regionId)
       .then((p) => {
         setProduct(p)
         if (p?.variants?.length) {
-          const initialVariant = p.variants.find(isVariantInStock) ?? p.variants[0]
+          const initialVariant =
+            (variantParam ? p.variants.find((v) => v.id === variantParam) : null) ??
+            p.variants.find(isVariantInStock) ??
+            p.variants[0]
           setSelectedVariant(initialVariant)
           const initial: Record<string, string> = {}
           p.options?.forEach((opt) => {
@@ -227,15 +240,62 @@ export function ProductPage() {
     }
   }, [product?.id])
 
-  // Reset qty when variant changes
-  useEffect(() => { setQty(1) }, [selectedVariant?.id])
+  // Show mobile sticky bar once the price block has scrolled behind the header
+  useEffect(() => {
+    if (!product?.id) return
+    const HEADER_H = 64
+    const check = () => {
+      const el = galleryRef.current
+      setImgScrolledOut(el ? el.getBoundingClientRect().bottom <= HEADER_H : false)
+    }
+    check()
+    window.addEventListener('scroll', check, { passive: true })
+    return () => window.removeEventListener('scroll', check)
+  }, [product?.id])
+
+  // Reset qty + stock message when variant changes
+  useEffect(() => { setQty(1); setStockMsg(null) }, [selectedVariant?.id])
+
+  useEffect(() => () => window.clearTimeout(stockMsgTimer.current), [])
+
+  // Доступный запас выбранного варианта (null = не ограничено)
+  const maxStock = selectedVariant ? getVariantStock(selectedVariant) : null
+
+  // Этот вариант уже в корзине?
+  const cartItem = selectedVariant
+    ? cart?.items?.find((i) => i.variant?.id === selectedVariant.id) ?? null
+    : null
+
+  const flashStock = useCallback((msg: string) => {
+    setStockMsg(msg)
+    window.clearTimeout(stockMsgTimer.current)
+    stockMsgTimer.current = window.setTimeout(() => setStockMsg(null), 2600)
+  }, [])
+
+  // Ограничить вводимое количество доступным запасом
+  const clampQty = (raw: number): number => {
+    let n = Math.max(1, Number.isFinite(raw) ? raw : 1)
+    if (maxStock != null && n > maxStock) {
+      n = maxStock
+      flashStock(`Доступно только ${maxStock} шт.`)
+    }
+    return n
+  }
+
+  const incQty = () => {
+    if (maxStock != null && qty >= maxStock) {
+      flashStock(`Доступно только ${maxStock} шт.`)
+      return
+    }
+    setQty((q) => q + 1)
+  }
 
   const handleAddToCart = async () => {
-    if (!inStock || !selectedVariant?.id || !regionId) return
+    if (!inStock || !selectedVariant?.id) return
     if (addingToCart) return
     setAddingToCart(true)
     try {
-      await addToCart(regionId, selectedVariant.id, qty)
+      await addToCart(selectedVariant.id, clampQty(qty))
       setAdded(true)
       setTimeout(() => setAdded(false), 1800)
     } catch {
@@ -243,6 +303,17 @@ export function ProductPage() {
     } finally {
       setAddingToCart(false)
     }
+  }
+
+  // Изменить количество уже добавленного в корзину варианта
+  const handleCartQty = async (next: number) => {
+    if (!cartItem || cartLoading) return
+    if (next < 1) { await removeItem(cartItem.id); return }
+    if (maxStock != null && next > maxStock) {
+      flashStock(`Доступно только ${maxStock} шт.`)
+      return
+    }
+    await updateItem(cartItem.id, next)
   }
 
   const uniqueImages = (() => {
@@ -278,6 +349,13 @@ export function ProductPage() {
   const descriptionIsHtml = product?.description
     ? /<[a-z][\s\S]*>/i.test(product.description)
     : false
+
+  // Return to the catalog at the exact place the user left it (path + filters
+  // + scroll). Falls back to the catalog top if there's no saved snapshot.
+  const handleBackToCatalog = useCallback(() => {
+    const saved = loadLatestCatalogView()
+    navigate(saved?.path ?? '/catalog', saved ? { state: { restore: saved } } : undefined)
+  }, [navigate])
 
   const headerProps = {
     scrolled,
@@ -324,7 +402,7 @@ export function ProductPage() {
               <div className="empty-state__icon">🔍</div>
               <p className="empty-state__text">Товар не найден</p>
               <p className="empty-state__hint">{error ?? 'Возможно, он был удалён или ссылка устарела'}</p>
-              <button className="pp-back-link" onClick={() => navigate('/catalog')}>
+              <button className="pp-back-link" onClick={handleBackToCatalog}>
                 Вернуться в каталог
               </button>
             </div>
@@ -345,7 +423,31 @@ export function ProductPage() {
       <AppHeader {...headerProps} />
 
       <div className="pp-edt-page">
+        {/* Mobile sticky top bar – appears when gallery scrolls out of view */}
+        <div className={`pp-edt-mob-stickybar${imgScrolledOut ? ' pp-edt-mob-stickybar--vis' : ''}`}>
+          <button className="pp-edt-mob-sb-btn" onClick={handleBackToCatalog} aria-label="Назад">
+            <ChevronLeft size={18} strokeWidth={2.5} />
+          </button>
+          <span className="pp-edt-mob-sb-price">
+            {price ? formatPrice(price.calculated, price.currency) : ''}
+            {price?.isOnSale && (price as any).discountPercent > 0 && (
+              <span className="pp-edt-mob-sb-discount">−{(price as any).discountPercent}%</span>
+            )}
+          </span>
+          <button
+            className={`pp-edt-mob-sb-btn${productIsFavorite ? ' pp-edt-mob-sb-btn--fav' : ''}`}
+            onClick={() => toggleFavorite({ productId: product.id, productHandle: product.handle!, variantId: selectedVariant?.id })}
+            aria-label={productIsFavorite ? 'Убрать из избранного' : 'В избранное'}
+          >
+            <Heart size={18} strokeWidth={1.8} fill={productIsFavorite ? 'currentColor' : 'none'} />
+          </button>
+        </div>
         <div className="pp-edt-wrap">
+          <button className="pp-edt-back" onClick={handleBackToCatalog}>
+            <ChevronLeft size={16} strokeWidth={2.2} />
+            Назад к каталогу
+          </button>
+
           <div className="pp-edt-pdp">
 
             {/* ── Gallery ── */}
@@ -373,6 +475,22 @@ export function ProductPage() {
                   <span className="pp-edt-g-cap">/ {String(activeImage + 1).padStart(2, '0')}</span>
                 )}
               </div>
+
+              {/* Mobile overlay buttons – fixed positioning so no ancestor overflow clips them */}
+              <button
+                className={`pp-edt-g-mobbtn pp-edt-g-mobbtn--back${imgScrolledOut ? ' pp-edt-g-mobbtn--gone' : ''}`}
+                onClick={handleBackToCatalog}
+                aria-label="Назад"
+              >
+                <ChevronLeft size={20} strokeWidth={2.5} />
+              </button>
+              <button
+                className={`pp-edt-g-mobbtn pp-edt-g-mobbtn--fav${productIsFavorite ? ' pp-edt-g-mobbtn--fav-on' : ''}${imgScrolledOut ? ' pp-edt-g-mobbtn--gone' : ''}`}
+                onClick={() => toggleFavorite({ productId: product.id, productHandle: product.handle!, variantId: selectedVariant?.id })}
+                aria-label={productIsFavorite ? 'Убрать из избранного' : 'В избранное'}
+              >
+                <Heart size={18} strokeWidth={1.8} fill={productIsFavorite ? 'currentColor' : 'none'} />
+              </button>
 
               {uniqueImages.length >= 2 && (
                 <div className="pp-edt-g-thumbs-track">
@@ -415,7 +533,7 @@ export function ProductPage() {
 
               {/* Breadcrumb */}
               <div className="pp-edt-crumb">
-                <button onClick={() => navigate('/catalog')}>Каталог</button>
+                <button onClick={handleBackToCatalog}>Каталог</button>
                 {categoryName && (
                   <>
                     <ChevronRight size={12} strokeWidth={2} />
@@ -438,20 +556,26 @@ export function ProductPage() {
                 )}
                 <span className={`pp-edt-stock${inStock ? ' pp-edt-stock--ok' : ' pp-edt-stock--off'}`}>
                   <span className="pp-edt-sd" />
-                  {inStock ? 'В наличии' : 'Нет в наличии'}
+                  {inStock
+                    ? (maxStock != null && maxStock < 5
+                        ? (maxStock === 1
+                            ? 'Остался 1 в наличии'
+                            : `Осталось ${maxStock} в наличии`)
+                        : 'В наличии')
+                    : 'Нет в наличии'}
                 </span>
-                {price?.isOnSale && (price as any).discountPercent > 0 && (
-                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--neon)', background: 'rgba(0,255,157,.1)', padding: '3px 10px', borderRadius: 100 }}>
-                    −{(price as any).discountPercent}%
-                  </span>
-                )}
               </div>
 
               {/* Price block */}
-              <div className="pp-edt-priceblock">
+              <div className="pp-edt-priceblock" ref={galleryRef}>
                 {price ? (
                   <>
-                    <span className="pp-edt-price-big">{formatPrice(price.calculated, price.currency)}</span>
+                    <div className="pp-edt-price-main">
+                      <span className="pp-edt-price-big">{formatPrice(price.calculated, price.currency)}</span>
+                      {price.isOnSale && (price as any).discountPercent > 0 && (
+                        <span className="pp-edt-price-discount">−{(price as any).discountPercent}%</span>
+                      )}
+                    </div>
                     {price.isOnSale && (
                       <span className="pp-edt-price-orig">{formatPrice(price.original, price.currency)}</span>
                     )}
@@ -459,16 +583,12 @@ export function ProductPage() {
                 ) : (
                   <span className="pp-edt-price-big">Цена по запросу</span>
                 )}
-                <span className="pp-edt-price-ship">
-                  <span className="pp-edt-ship-dot" />
-                  Бесплатная доставка
-                </span>
               </div>
 
               {/* Options */}
               {product.options?.map((option) => {
                 const uniqueValues = [...new Set(option.values?.map((v) => v.value) ?? [])]
-                if (uniqueValues.length === 0) return null
+                if (uniqueValues.length <= 1) return null
                 return (
                   <div key={option.id} className="pp-edt-opt">
                     <div className="pp-edt-opt-label">
@@ -489,8 +609,8 @@ export function ProductPage() {
                             className={[
                               'pp-edt-opt-btn',
                               isSelected ? 'pp-edt-opt-btn--on' : '',
+                              !available ? 'pp-edt-opt-btn--na' : '',
                             ].filter(Boolean).join(' ')}
-                            disabled={!available}
                             onClick={() => {
                               setSelectedOptionValues((prev) => ({ ...prev, [option.id]: val }))
                               if (matchingVariant) setSelectedVariant(matchingVariant)
@@ -506,42 +626,76 @@ export function ProductPage() {
               })}
 
               {/* Quantity + Add to cart */}
-              <div className="pp-edt-opt">
-                <div className="pp-edt-opt-label">Количество</div>
+              <div className="pp-edt-opt pp-edt-opt--buy">
+                <div className="pp-edt-opt-label">
+                  {cartItem ? 'В корзине' : 'Количество'}
+                </div>
                 <div className="pp-edt-buyrow">
-                  <div className="pp-edt-qty">
-                    <button type="button" onClick={() => setQty(q => Math.max(1, q - 1))} aria-label="Уменьшить">−</button>
-                    <input
-                      type="number"
-                      value={qty}
-                      min={1}
-                      onChange={(e) => setQty(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                      aria-label="Количество"
-                    />
-                    <button type="button" onClick={() => setQty(q => q + 1)} aria-label="Увеличить">+</button>
-                  </div>
-                  <button
-                    type="button"
-                    className={`pp-edt-btn-cart${!inStock ? ' pp-edt-btn-cart--sold' : added ? ' pp-edt-btn-cart--added' : ''}`}
-                    onClick={handleAddToCart}
-                    disabled={!inStock || addingToCart}
-                  >
-                    {!inStock
-                      ? 'Нет в наличии'
-                      : added
-                        ? 'Добавлено ✓'
-                        : <>{price ? <>В корзину<span className="pp-edt-cart-tot"> · {formatPrice(price.calculated * qty, price.currency)}</span></> : 'В корзину'}</>
-                    }
-                  </button>
+                  {cartItem && inStock ? (
+                    <>
+                      <div className={`pp-edt-qty${cartLoading ? ' pp-edt-qty--busy' : ''}`}>
+                        <button type="button" onClick={() => handleCartQty(cartItem.quantity - 1)} disabled={cartLoading} aria-label="Уменьшить">−</button>
+                        <input
+                          type="number"
+                          value={cartItem.quantity}
+                          min={1}
+                          onChange={(e) => handleCartQty(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                          aria-label="Количество в корзине"
+                        />
+                        <button type="button" onClick={() => handleCartQty(cartItem.quantity + 1)} disabled={cartLoading} aria-label="Увеличить">+</button>
+                      </div>
+                      <button
+                        type="button"
+                        className="pp-edt-btn-cart pp-edt-btn-cart--incart"
+                        onClick={() => navigate('/cart')}
+                      >
+                        <ShoppingCart size={17} strokeWidth={1.8} />
+                        Перейти
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <div className="pp-edt-qty">
+                        <button type="button" onClick={() => setQty(q => Math.max(1, q - 1))} aria-label="Уменьшить">−</button>
+                        <input
+                          type="number"
+                          value={qty}
+                          min={1}
+                          max={maxStock ?? undefined}
+                          onChange={(e) => setQty(clampQty(parseInt(e.target.value, 10)))}
+                          aria-label="Количество"
+                        />
+                        <button type="button" onClick={incQty} aria-label="Увеличить">+</button>
+                      </div>
+                      <button
+                        type="button"
+                        className={`pp-edt-btn-cart${!inStock ? ' pp-edt-btn-cart--sold' : added ? ' pp-edt-btn-cart--added' : ''}`}
+                        onClick={handleAddToCart}
+                        disabled={!inStock || addingToCart}
+                      >
+                        {!inStock
+                          ? 'Нет в наличии'
+                          : added
+                            ? 'Добавлено ✓'
+                            : <>{price ? <>В корзину<span className="pp-edt-cart-tot"> · {formatPrice(price.calculated * qty, price.currency)}</span></> : 'В корзину'}</>
+                        }
+                      </button>
+                    </>
+                  )}
                   <button
                     type="button"
                     className={`pp-edt-btn-fav${productIsFavorite ? ' pp-edt-btn-fav--on' : ''}`}
                     aria-label={productIsFavorite ? 'Убрать из избранного' : 'В избранное'}
-                    onClick={() => toggleFavorite(product.id)}
+                    onClick={() => toggleFavorite({
+                      productId: product.id,
+                      productHandle: product.handle!,
+                      variantId: selectedVariant?.id,
+                    })}
                   >
                     <Heart size={20} strokeWidth={1.8} fill={productIsFavorite ? 'currentColor' : 'none'} />
                   </button>
                 </div>
+                {stockMsg && <div className="pp-edt-stock-msg">{stockMsg}</div>}
               </div>
 
               {/* Reassurance */}
@@ -613,6 +767,47 @@ export function ProductPage() {
                 })}
               </div>
             </div>
+          )}
+        </div>
+
+        {/* Mobile sticky cart bar */}
+        <div className="pp-edt-mob-cartbar">
+          {cartItem && inStock ? (
+            <>
+              <div className={`pp-edt-qty${cartLoading ? ' pp-edt-qty--busy' : ''}`}>
+                <button type="button" onClick={() => handleCartQty(cartItem.quantity - 1)} disabled={cartLoading} aria-label="Уменьшить">−</button>
+                <input
+                  type="number"
+                  value={cartItem.quantity}
+                  min={1}
+                  onChange={(e) => handleCartQty(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                  aria-label="Количество в корзине"
+                />
+                <button type="button" onClick={() => handleCartQty(cartItem.quantity + 1)} disabled={cartLoading} aria-label="Увеличить">+</button>
+              </div>
+              <button
+                type="button"
+                className="pp-edt-btn-cart pp-edt-btn-cart--incart"
+                onClick={() => navigate('/cart')}
+              >
+                <ShoppingCart size={18} strokeWidth={2} />
+                Перейти
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className={`pp-edt-btn-cart${!inStock ? ' pp-edt-btn-cart--sold' : added ? ' pp-edt-btn-cart--added' : ''}`}
+              onClick={handleAddToCart}
+              disabled={!inStock || addingToCart}
+            >
+              {!inStock
+                ? 'Нет в наличии'
+                : added
+                  ? 'Добавлено ✓'
+                  : <>{price ? <>В корзину<span className="pp-edt-cart-tot"> · {formatPrice(price.calculated, price.currency)}</span></> : 'В корзину'}</>
+              }
+            </button>
           )}
         </div>
       </div>

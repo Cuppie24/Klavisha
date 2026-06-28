@@ -17,7 +17,7 @@ interface Props {
   onBackToCategories: () => void
   regionId: string | null | undefined
   favorites: string[]
-  onToggleFavorite: (id: string) => void
+  onToggleFavorite: (product: MedusaProduct) => void
 }
 
 type SortOrder = 'default' | 'asc' | 'desc'
@@ -301,7 +301,7 @@ export function SearchResultsView({
                   key={product.id}
                   product={product}
                   isFavorite={favSet.has(product.id)}
-                  onToggleFavorite={() => onToggleFavorite(product.id)}
+                  onToggleFavorite={() => onToggleFavorite(product)}
                   onCardClick={() => navigate(`/product/${product.handle}`)}
                 />
               ))}

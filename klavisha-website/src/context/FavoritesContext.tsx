@@ -1,19 +1,20 @@
 import { createContext, useContext, type ReactNode } from 'react'
-import { useFavorites } from '../hooks/useFavorites'
+import { useFavorites, type FavoriteItem } from '../hooks/useFavorites'
 
 interface FavoritesContextValue {
-  favorites: string[]
-  toggleFavorite: (id: string) => void
+  favorites: FavoriteItem[]
+  favoriteIds: string[]
+  toggleFavorite: (item: FavoriteItem) => void
   isFavorite: (id: string) => boolean
 }
 
 const FavoritesContext = createContext<FavoritesContextValue | null>(null)
 
 export function FavoritesProvider({ children }: { children: ReactNode }) {
-  const { favorites, toggleFavorite, isFavorite } = useFavorites()
+  const { favorites, favoriteIds, toggleFavorite, isFavorite } = useFavorites()
 
   return (
-    <FavoritesContext.Provider value={{ favorites, toggleFavorite, isFavorite }}>
+    <FavoritesContext.Provider value={{ favorites, favoriteIds, toggleFavorite, isFavorite }}>
       {children}
     </FavoritesContext.Provider>
   )

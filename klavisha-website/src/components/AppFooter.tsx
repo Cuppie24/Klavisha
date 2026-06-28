@@ -43,31 +43,6 @@ export function AppFooter() {
           </p>
         </div>
 
-        <div className="sc-col">
-          <h4>Каталог</h4>
-          <Link to="/catalog">Все товары</Link>
-          <Link to="/catalog">Клавиатуры</Link>
-          <Link to="/catalog">Кейкапы</Link>
-          <Link to="/catalog">Свитчи</Link>
-          <Link to="/catalog">Аксессуары</Link>
-        </div>
-
-        <div className="sc-col">
-          <h4>Помощь</h4>
-          <a href="#">Доставка</a>
-          <a href="#">Возврат</a>
-          <a href="#">Гарантия</a>
-          <a href="#">Контакты</a>
-        </div>
-
-        <div className="sc-col">
-          <h4>Студия</h4>
-          <a href="#">Кастом-сборка</a>
-          <a href="#">Гайды</a>
-          <a href="#">Журнал</a>
-          <a href="#">Оптовикам</a>
-        </div>
-
       </div>
 
       <div className="sc-wrap sc-foot-bottom">

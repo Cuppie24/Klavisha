@@ -14,11 +14,21 @@ interface Props {
   category: MedusaCategory
   regionId: string | null | undefined
   favorites: string[]
-  onToggleFavorite: (id: string) => void
+  onToggleFavorite: (product: MedusaProduct) => void
   index?: number
   sort?: CatalogSort
   priceRange?: [number, number] | null
+  q?: string
 }
+
+// Cache loaded product lists for the SPA session, keyed by category + region + query.
+// Returning to the catalog (back button or in-app) then re-renders sections
+// instantly at their full height — the prerequisite for restoring scroll
+// position. Without this the page is empty on return and there's nothing to
+// scroll to. Lives at module scope so it survives CatalogPage unmount.
+const _sectionCache = new Map<string, MedusaProduct[]>()
+const sectionKey = (categoryId: string, regionId: string | null | undefined, q?: string) =>
+  `${categoryId}::${regionId ?? ''}::${q ?? ''}`
 
 export function CategorySection({
   category,
@@ -28,14 +38,18 @@ export function CategorySection({
   index,
   sort = 'default',
   priceRange = null,
+  q,
 }: Props) {
   const navigate = useNavigate()
   const categoryRef = useRef(category)
   categoryRef.current = category
   const triggerRef = useRef<HTMLDivElement>(null)
-  const [products, setProducts] = useState<MedusaProduct[]>([])
+  // Hydrate synchronously from the session cache so a returning catalog renders
+  // at full height on the first paint (no lazy-load flash).
+  const cached = _sectionCache.get(sectionKey(category.id, regionId, q))
+  const [products, setProducts] = useState<MedusaProduct[]>(cached ?? [])
   const [loading, setLoading] = useState(false)
-  const [fetched, setFetched] = useState(false)
+  const [fetched, setFetched] = useState(cached !== undefined)
   const [error, setError] = useState<string | null>(null)
 
   const isLeaf = category.category_children.length === 0
@@ -45,6 +59,40 @@ export function CategorySection({
   useEffect(() => {
     if (!isLeaf || fetched || regionId === undefined) return
 
+    const ck = sectionKey(category.id, regionId, q)
+
+    // Serve from cache without a network round-trip.
+    const hit = _sectionCache.get(ck)
+    if (hit !== undefined) {
+      setProducts(hit)
+      setFetched(true)
+      return
+    }
+
+    const doFetch = () => {
+      setLoading(true)
+      setError(null)
+      const cat = categoryRef.current
+      const categoryId = isOther ? undefined : collectDescendantIds(cat)
+      listProducts({ regionId: regionId ?? undefined, categoryId, q, limit: 100 })
+        .then(({ products: p }) => {
+          const filtered = isOther
+            ? p.filter((prod) => !prod.categories || prod.categories.length === 0)
+            : p
+          _sectionCache.set(ck, filtered)
+          setProducts(filtered)
+          setFetched(true)
+        })
+        .catch((err: Error) => setError(err.message ?? 'Ошибка загрузки товаров'))
+        .finally(() => setLoading(false))
+    }
+
+    // When a search query is active, fetch all sections immediately (no lazy load).
+    if (q) {
+      doFetch()
+      return
+    }
+
     const el = triggerRef.current
     if (!el) return
 
@@ -52,27 +100,14 @@ export function CategorySection({
       ([entry]) => {
         if (entry.isIntersecting) {
           io.disconnect()
-          setLoading(true)
-          setError(null)
-          const cat = categoryRef.current
-          const categoryId = isOther ? undefined : collectDescendantIds(cat)
-          listProducts({ regionId: regionId ?? undefined, categoryId, limit: 100 })
-            .then(({ products: p }) => {
-              const filtered = isOther
-                ? p.filter((prod) => !prod.categories || prod.categories.length === 0)
-                : p
-              setProducts(filtered)
-              setFetched(true)
-            })
-            .catch((err: Error) => setError(err.message ?? 'Ошибка загрузки товаров'))
-            .finally(() => setLoading(false))
+          doFetch()
         }
       },
       { rootMargin: '200px 0px', threshold: 0 }
     )
     io.observe(el)
     return () => io.disconnect()
-  }, [isLeaf, fetched, regionId, isOther])
+  }, [isLeaf, fetched, regionId, isOther, category.id, q])
 
   const favSet = useMemo(() => new Set(favorites), [favorites])
 
@@ -100,8 +135,8 @@ export function CategorySection({
     return arr
   }, [products, sort, priceRange])
 
-  // When a price filter is active and this leaf has nothing in range, collapse it.
-  if (isLeaf && fetched && !loading && !error && priceRange && visible.length === 0) {
+  // Collapse leaf when price filter or search query yields nothing.
+  if (isLeaf && fetched && !loading && !error && (priceRange || q) && visible.length === 0) {
     return null
   }
 
@@ -141,6 +176,7 @@ export function CategorySection({
           onToggleFavorite={onToggleFavorite}
           sort={sort}
           priceRange={priceRange}
+          q={q}
         />
       ))}
 
@@ -172,7 +208,7 @@ export function CategorySection({
                   key={product.id}
                   product={product}
                   isFavorite={favSet.has(product.id)}
-                  onToggleFavorite={() => onToggleFavorite(product.id)}
+                  onToggleFavorite={() => onToggleFavorite(product)}
                   onCardClick={() => navigate(`/product/${product.handle}`)}
                 />
               ))}

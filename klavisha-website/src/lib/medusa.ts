@@ -121,14 +121,34 @@ export const OTHER_CATEGORY: MedusaCategory = {
   is_internal: false,
 }
 
+// Memoised for the SPA session so returning to the catalog (back button / in-app)
+// rebuilds its shell instantly instead of refetching — a prerequisite for scroll
+// restoration, which needs the page at full height immediately on return. We keep
+// both the promise (for the first await) and the resolved value (for a synchronous
+// read on the first render of a returning catalog, before any effect runs).
+let _categoriesPromise: Promise<MedusaCategory[]> | null = null
+let _categoriesValue: MedusaCategory[] | null = null
+
 export async function listCategories(): Promise<MedusaCategory[]> {
-  const { product_categories } = await medusaFetch<{
-    product_categories: MedusaCategory[]
-    count: number
-  }>(
-    '/store/product-categories?include_descendants_tree=true'
-  )
-  return product_categories
+  if (_categoriesPromise) return _categoriesPromise
+  _categoriesPromise = (async () => {
+    const { product_categories } = await medusaFetch<{
+      product_categories: MedusaCategory[]
+      count: number
+    }>(
+      '/store/product-categories?include_descendants_tree=true'
+    )
+    _categoriesValue = product_categories
+    return product_categories
+  })()
+  // Don't cache a rejected request — let the next call retry.
+  _categoriesPromise.catch(() => { _categoriesPromise = null })
+  return _categoriesPromise
+}
+
+// Synchronously read the cached categories (null until the first fetch resolves).
+export function getCachedCategories(): MedusaCategory[] | null {
+  return _categoriesValue
 }
 
 // ─── Продукты (параметры) ─────────────────────────────────────────────────────
@@ -176,21 +196,37 @@ export async function listProducts(params: ProductListParams = {}): Promise<{
 
 // ─── Активные категории (есть хоть один товар) ───────────────────────────────
 
-export async function getActiveCategoryIds(): Promise<{ categoryIds: Set<string>; hasUncategorized: boolean }> {
-  const data = await medusaFetch<{ products: MedusaProduct[] }>(
-    '/store/products?limit=500&fields=*categories,*tags'
-  )
-  const products = data.products.filter(p => !p.tags?.some(t => t.value === 'system'))
-  const categoryIds = new Set<string>()
-  let hasUncategorized = false
-  for (const product of products) {
-    if (!product.categories || product.categories.length === 0) {
-      hasUncategorized = true
-    } else {
-      product.categories.forEach(c => categoryIds.add(c.id))
+type ActiveCategoryIds = { categoryIds: Set<string>; hasUncategorized: boolean }
+let _activeCategoryIdsPromise: Promise<ActiveCategoryIds> | null = null
+let _activeCategoryIdsValue: ActiveCategoryIds | null = null
+
+export async function getActiveCategoryIds(): Promise<ActiveCategoryIds> {
+  if (_activeCategoryIdsPromise) return _activeCategoryIdsPromise
+  _activeCategoryIdsPromise = (async () => {
+    const data = await medusaFetch<{ products: MedusaProduct[] }>(
+      '/store/products?limit=500&fields=*categories,*tags'
+    )
+    const products = data.products.filter(p => !p.tags?.some(t => t.value === 'system'))
+    const categoryIds = new Set<string>()
+    let hasUncategorized = false
+    for (const product of products) {
+      if (!product.categories || product.categories.length === 0) {
+        hasUncategorized = true
+      } else {
+        product.categories.forEach(c => categoryIds.add(c.id))
+      }
     }
-  }
-  return { categoryIds, hasUncategorized }
+    const value = { categoryIds, hasUncategorized }
+    _activeCategoryIdsValue = value
+    return value
+  })()
+  _activeCategoryIdsPromise.catch(() => { _activeCategoryIdsPromise = null })
+  return _activeCategoryIdsPromise
+}
+
+// Synchronously read the cached active-category ids (null until first resolve).
+export function getCachedActiveCategoryIds(): ActiveCategoryIds | null {
+  return _activeCategoryIdsValue
 }
 
 // ─── Цены всех товаров (для фильтра каталога) ────────────────────────────────
@@ -308,12 +344,14 @@ export function clearCartId() {
   localStorage.removeItem(CART_ID_KEY)
 }
 
+const CART_FIELDS = 'fields=*items,*items.variant,*items.variant.product'
+
 export async function getOrCreateCart(regionId: string): Promise<MedusaCart> {
   const existingId = getCartId()
 
   if (existingId) {
     try {
-      const { cart } = await medusaFetch<{ cart: MedusaCart }>(`/store/carts/${existingId}`)
+      const { cart } = await medusaFetch<{ cart: MedusaCart }>(`/store/carts/${existingId}?${CART_FIELDS}`)
       return cart
     } catch {
       // Корзина устарела — создаём новую
@@ -321,7 +359,7 @@ export async function getOrCreateCart(regionId: string): Promise<MedusaCart> {
     }
   }
 
-  const { cart } = await medusaFetch<{ cart: MedusaCart }>('/store/carts', {
+  const { cart } = await medusaFetch<{ cart: MedusaCart }>(`/store/carts?${CART_FIELDS}`, {
     method: 'POST',
     body: JSON.stringify({ region_id: regionId }),
   })
@@ -333,7 +371,7 @@ export async function retrieveCart(): Promise<MedusaCart | null> {
   const cartId = getCartId()
   if (!cartId) return null
   try {
-    const { cart } = await medusaFetch<{ cart: MedusaCart }>(`/store/carts/${cartId}`)
+    const { cart } = await medusaFetch<{ cart: MedusaCart }>(`/store/carts/${cartId}?${CART_FIELDS}`)
     return cart
   } catch {
     return null
@@ -347,7 +385,7 @@ export async function addToCart(
 ): Promise<MedusaCart> {
   const cart = await getOrCreateCart(regionId)
   const { cart: updated } = await medusaFetch<{ cart: MedusaCart }>(
-    `/store/carts/${cart.id}/line-items`,
+    `/store/carts/${cart.id}/line-items?${CART_FIELDS}`,
     {
       method: 'POST',
       body: JSON.stringify({ variant_id: variantId, quantity }),
@@ -363,7 +401,7 @@ export async function updateCartItem(
   const cartId = getCartId()
   if (!cartId) throw new Error('No cart')
   const { cart } = await medusaFetch<{ cart: MedusaCart }>(
-    `/store/carts/${cartId}/line-items/${itemId}`,
+    `/store/carts/${cartId}/line-items/${itemId}?${CART_FIELDS}`,
     {
       method: 'POST',
       body: JSON.stringify({ quantity }),
@@ -376,10 +414,30 @@ export async function removeCartItem(itemId: string): Promise<MedusaCart> {
   const cartId = getCartId()
   if (!cartId) throw new Error('No cart')
   const { cart } = await medusaFetch<{ cart: MedusaCart }>(
-    `/store/carts/${cartId}/line-items/${itemId}`,
+    `/store/carts/${cartId}/line-items/${itemId}?${CART_FIELDS}`,
     { method: 'DELETE' }
   )
   return cart
+}
+
+// ─── Оформление заказа ────────────────────────────────────────────────────────
+
+export interface OrderRequestPayload {
+  cart_id: string
+  name: string
+  phone: string
+  address: string
+  comment?: string
+  items: { title: string; variant_title?: string; quantity: number; unit_price: number }[]
+  total: number
+  currency_code: string
+}
+
+export async function submitOrderRequest(payload: OrderRequestPayload): Promise<{ success: boolean; order_id: string | null }> {
+  return medusaFetch<{ success: boolean; order_id: string | null }>('/store/order-request', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
 }
 
 // ─── Утилиты форматирования цен ───────────────────────────────────────────────
@@ -440,6 +498,39 @@ export function isVariantInStock(variant: MedusaProductVariant): boolean {
   return variant.inventory_quantity > 0
 }
 
+// Доступное количество варианта на складе. Возвращает null, когда запас не
+// ограничен (инвентарь не отслеживается или разрешён бэкордер).
+export function getVariantStock(
+  variant: Pick<MedusaProductVariant, 'manage_inventory' | 'allow_backorder' | 'inventory_quantity'>
+): number | null {
+  if (!variant.manage_inventory) return null
+  if (variant.allow_backorder) return null
+  if (variant.inventory_quantity == null) return null
+  return variant.inventory_quantity
+}
+
+// Карта «id варианта → доступный запас» для набора товаров. Запас (computed
+// inventory_quantity) не приходит в ответе корзины, поэтому его берём из
+// эндпоинта товаров, где он доступен. null = запас не ограничен.
+export async function getVariantStockMap(
+  productIds: string[]
+): Promise<Record<string, number | null>> {
+  const ids = [...new Set(productIds.filter(Boolean))]
+  if (!ids.length) return {}
+  const query = new URLSearchParams()
+  ids.forEach((id) => query.append('id[]', id))
+  query.set('limit', String(ids.length))
+  query.set('fields', 'id,*variants,+variants.inventory_quantity,+variants.manage_inventory,+variants.allow_backorder')
+  const { products } = await medusaFetch<{ products: MedusaProduct[] }>(
+    `/store/products?${query.toString()}`
+  )
+  const map: Record<string, number | null> = {}
+  for (const p of products) {
+    for (const v of p.variants ?? []) map[v.id] = getVariantStock(v)
+  }
+  return map
+}
+
 // ─── Регион по умолчанию (кешируется) ─────────────────────────────────────────
 
 let _defaultRegion: MedusaRegion | null = null
@@ -447,5 +538,10 @@ let _defaultRegion: MedusaRegion | null = null
 export async function getDefaultRegion(): Promise<MedusaRegion | null> {
   if (_defaultRegion) return _defaultRegion
   _defaultRegion = await getRegionByCountry(DEFAULT_REGION)
+  return _defaultRegion
+}
+
+// Synchronously read the cached default region (null until first resolve).
+export function getCachedDefaultRegion(): MedusaRegion | null {
   return _defaultRegion
 }
