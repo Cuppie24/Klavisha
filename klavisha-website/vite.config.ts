@@ -12,6 +12,6 @@ export default defineConfig({
   },
   server: {
     port: 8000,
-    strictPort: true, // упасть с ошибкой если 8000 занят, а не выбрать другой
+    strictPort: true,
   },
 })

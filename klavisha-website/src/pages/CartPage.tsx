@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate, Link } from 'react-router-dom'
 import PhoneInput, { type Value as PhoneValue, isValidPhoneNumber } from 'react-phone-number-input'
 import 'react-phone-number-input/style.css'
@@ -42,7 +43,8 @@ interface FormState { name: string; phone: PhoneValue | undefined; address: stri
 export function CartPage() {
   const navigate = useNavigate()
   const { cart, loading, updateItem, removeItem, clearCart, resetCart } = useCartContext()
-  const [scrolled,   setScrolled]   = useState(false)
+  const [scrolled,     setScrolled]     = useState(false)
+  const [summaryOpen,  setSummaryOpen]  = useState(false)
   const [removingId, setRemovingId] = useState<string | null>(null)
   const [updatingId, setUpdatingId] = useState<string | null>(null)
   const [stockMsgId, setStockMsgId] = useState<string | null>(null)
@@ -99,6 +101,11 @@ export function CartPage() {
   useEffect(() => {
     if (done) resetCart()
   }, [done]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    document.body.style.overflow = summaryOpen ? 'hidden' : ''
+    return () => { document.body.style.overflow = '' }
+  }, [summaryOpen])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -252,6 +259,7 @@ export function CartPage() {
   // ── Cart ──────────────────────────────────────────────────────────────────────
 
   return (
+    <>
     <div className="layout">
       <AppHeader {...headerProps} />
 
@@ -376,7 +384,13 @@ export function CartPage() {
             </section>
 
             {/* ── Summary / Order form ── */}
-            <aside className="cart-summary">
+            <aside className={`cart-summary${summaryOpen ? ' cart-summary--open' : ''}`}>
+              <button className="sum-back" onClick={() => setSummaryOpen(false)}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M19 12H5M12 19l-7-7 7-7" />
+                </svg>
+                Корзина
+              </button>
               <h2 className="sum-h">Сводка заказа</h2>
 
               {/* Shipping progress bar */}
@@ -477,9 +491,24 @@ export function CartPage() {
             </aside>
           </div>
         </div>
+
       </main>
 
       <AppFooter />
     </div>
+
+    {createPortal(
+      <div className="cart-mobile-bar">
+        <div className="cmb-info">
+          <div className="cmb-total">{formatPrice(total, currency)}</div>
+          <div className="cmb-count">{itemCount} {pluralItems(itemCount)}</div>
+        </div>
+        <button className="cmb-btn" onClick={() => setSummaryOpen(true)}>
+          Оформить заказ <span className="cmb-arr">→</span>
+        </button>
+      </div>,
+      document.body
+    )}
+    </>
   )
 }
